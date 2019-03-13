@@ -7,12 +7,13 @@
 // error code
 #define FINGERPRINT_EXIST 0x20
 #define FINGERPRINT_NOMASTER 0x21
+#define SHD_CANCEL 0x22
 
-// BUTTONS
-#define UP_BUTTON 19 // green wire
-#define DOWN_BUTTON 20 // grey wire
-#define BACK_BUTTON 21 // red wire
-#define ENTER_BUTTON 18 // black wire
+// BUTTONS ARRAY POSITION
+#define UP_BUTTON 0 // green wire
+#define DOWN_BUTTON 1 // grey wire
+#define BACK_BUTTON 2 // red wire
+#define ENTER_BUTTON 3 // black wire
 
 // RFID SPI PINS
 #define SS_PIN 10
@@ -26,6 +27,10 @@
 #define DATA_6 5
 #define DATA_7 4
 
+constexpr int buttons[] = {A1, A2, A3, A0};
+String options[] = {"Enroll", "Delete", "Details", "Working"};
+const int OPTION_LENGTH = (sizeof(options)/sizeof(options[0]));
+
 int lcdCursor = 0;
 int lcdCursorCharPosition = 0;
 const String lcdCursorChar = "*";
@@ -33,7 +38,9 @@ const String lcdCursorChar = "*";
 void printError(uint8_t errorCode);
 uint8_t getFingerId();
 uint8_t fingerEnroll(uint8_t socketId);
-int checkButton(uint16_t time);
+int checkButtons(uint16_t time = 1);
+void selectOption();
+uint8_t saveName(uint8_t socketId);
 
 // Module objects
 LiquidCrystal lcd(READ_SET, ENABLE, DATA_4, DATA_5, DATA_6, DATA_7);
@@ -49,10 +56,10 @@ void setup() {
 	Serial.begin(9600);
 	lcd.begin(16,2);	
 	lcd.print("Starting...");
-	pinMode(DOWN_BUTTON,INPUT);
-	pinMode(BACK_BUTTON,INPUT);
-	pinMode(UP_BUTTON,INPUT);
-	pinMode(ENTER_BUTTON,INPUT);
+	pinMode(buttons[DOWN_BUTTON],INPUT_PULLUP);
+	pinMode(buttons[BACK_BUTTON],INPUT_PULLUP);
+	pinMode(buttons[UP_BUTTON],INPUT_PULLUP);
+	pinMode(buttons[ENTER_BUTTON],INPUT_PULLUP);
 	SPI.begin();	// Init SPI bus
 	mfrc522.PCD_Init();	// Init MFRC522
 	delay(500);
@@ -99,7 +106,6 @@ void loop() {
 
 	while(true){
 		lcd.clear();
-		String options[] = {"Enroll", "Delete", "Details", "Working"};
 		int counter = 0;
 		if(true){
 			for(int i = lcdCursor; counter < 2; i++){
@@ -109,33 +115,82 @@ void loop() {
 			}
 			lcd.setCursor(15,lcdCursorCharPosition);
 			lcd.print(lcdCursorChar);
-			int buttonStatus = checkButton(100);
+			int buttonStatus = checkButtons(1000);
+			delay(300);
 
 			switch (buttonStatus){
-				case UP_BUTTON:
+				case buttons[UP_BUTTON]:
 					if(lcdCursorCharPosition == 0)
 						lcdCursor--;
 					else if(lcdCursorCharPosition == 1)
 						lcdCursorCharPosition = 0;
+					if(lcdCursor <= 0)
+						lcdCursor = 0;
 					break;
-				case DOWN_BUTTON:
+				case buttons[DOWN_BUTTON]:
 					if(lcdCursorCharPosition == 1)
 						lcdCursor++;
 					else if(lcdCursorCharPosition == 0)
 						lcdCursorCharPosition = 1;
+					if(lcdCursor >= OPTION_LENGTH-1)
+						lcdCursor = OPTION_LENGTH-2;
 					break;
-				case ENTER_BUTTON:
-					/* code */
+				case buttons[ENTER_BUTTON]:
+					selectOption();
 					break;
-				case BACK_BUTTON:
-					/* code */
+				case buttons[BACK_BUTTON]:
+					lcdCursor = 0;
+					lcdCursorCharPosition = 0;
 					break;
 			}
 		}
 	}
 }
 
-int checkButton(uint16_t time){
+void selectOption(){
+	if(lcdCursor == 0 && lcdCursorCharPosition == 0){ // Enroll
+		while(true){
+			lcd.clear();
+			finger.getTemplateCount();
+			int registerId = finger.templateCount+1;
+			lcd.print("Register ID: ");
+			lcd.print(registerId);
+			delay(1000);
+			int errorCode = fingerEnroll(registerId);
+			if(errorCode == FINGERPRINT_OK){
+				saveName(registerId);
+				return;
+			}else{
+				printError(errorCode);
+				if(errorCode == SHD_CANCEL)
+					return;
+			}
+		}
+	}else if((lcdCursor == 0 && lcdCursorCharPosition == 1) || (lcdCursor == 1 && lcdCursorCharPosition == 0)){ // Delete
+		lcd.clear();
+		lcd.print("Delete");
+	}else if((lcdCursor == 1 && lcdCursorCharPosition == 1) || (lcdCursor == 2 && lcdCursorCharPosition == 0)){ // Details
+		lcd.clear();
+		lcd.print("Details");
+	}else if((lcdCursor == 2 && lcdCursorCharPosition == 1)){ // Working
+		lcd.clear();
+		lcd.print("Working");
+	}else{
+		lcd.clear();
+		lcd.print("Cursor: ");
+		lcd.print(lcdCursor);
+		lcd.setCursor(0,1);
+		lcd.print("Char: ");
+		lcd.print(lcdCursorCharPosition);
+	}
+	delay(2500);
+}
+
+uint8_t saveName(uint8_t socketId){
+	return;
+}
+
+int checkButtons(uint16_t time = 1){
 	Serial.print("start    ");
 	Serial.println(time);
 
@@ -143,14 +198,19 @@ int checkButton(uint16_t time){
 		Serial.print("Counter: ");
 		Serial.println(i);
 		delay(1);
-		if(digitalRead(UP_BUTTON))
-			return UP_BUTTON;
-		else if(digitalRead(DOWN_BUTTON))
-			return DOWN_BUTTON;
-		else if(digitalRead(BACK_BUTTON))
-			return BACK_BUTTON;
-		else if(digitalRead(ENTER_BUTTON))
-			return ENTER_BUTTON;
+		Serial.print("UP: "); Serial.println(digitalRead(buttons[UP_BUTTON]));
+		Serial.print("DOWN: "); Serial.println(digitalRead(buttons[DOWN_BUTTON]));
+		Serial.print("BACK: "); Serial.println(digitalRead(buttons[BACK_BUTTON]));
+		Serial.print("ENTER: "); Serial.println(digitalRead(buttons[ENTER_BUTTON]));
+		delay(1);
+		if(digitalRead(buttons[UP_BUTTON]))
+			return buttons[UP_BUTTON];
+		else if(digitalRead(buttons[DOWN_BUTTON]))
+			return buttons[DOWN_BUTTON];
+		else if(digitalRead(buttons[BACK_BUTTON]))
+			return buttons[BACK_BUTTON];
+		else if(digitalRead(buttons[ENTER_BUTTON]))
+			return buttons[ENTER_BUTTON];
 	}
 	return false;
 }
@@ -161,6 +221,8 @@ uint8_t fingerEnroll(uint8_t socketId){
 	lcd.print("Put your finger"); 
 	while (p != FINGERPRINT_OK) {
     p = finger.getImage();
+		if(checkButtons() == buttons[BACK_BUTTON])
+			return SHD_CANCEL;
   }
 	p = finger.image2Tz(1);
 	lcd.clear();
@@ -240,6 +302,9 @@ void printError(uint8_t errorCode){
 				break;
 			case FINGERPRINT_NOMASTER:
 				lcd.print("No MASTER ID");
+				break;
+			case SHD_CANCEL:
+				lcd.print("Cancel");
 				break;
 			default:
 				lcd.print("Something wrong.");
